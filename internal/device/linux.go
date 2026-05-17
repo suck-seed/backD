@@ -65,7 +65,7 @@ func mountOptionsWritable(mount string) (bool, error) {
 			continue
 		}
 
-		for _, o := range strings.Split(fields[3], ",") {
+		for o := range strings.SplitSeq(fields[3], ",") {
 			if o == "ro" {
 				return false, nil
 			}
