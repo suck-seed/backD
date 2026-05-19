@@ -1,6 +1,13 @@
 package backup
 
-import "time"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"go.yaml.in/yaml/v3"
+)
 
 // BackDFolder is the top-level folder created on the external device.
 const BackDFolder = "backD"
@@ -13,15 +20,52 @@ const backdMetaDir = ".backd"
 //
 // One manifest file is kept per template, stored at:
 //
-//	<deviceMount>/backD/.backd/templates/<templateName>-manifest.json
+//	<deviceMount>/backD/.backd/templates/<templateName>-manifest.yaml
 //
 // A global manifest (not tied to a template) is stored at:
 //
-//	<deviceMount>/backD/.backd/manifest.json
+//	<deviceMount>/backD/.backd/manifest.yaml
 type Manifest struct {
-	TemplateName string       `json:"template_name"`
-	Algorithm    string       `json:"algorithm"`
-	CreatedAt    time.Time    `json:"created_at"`
-	UpdatedAt    time.Time    `json:"updated_at"`
-	Roots        []MerkleNode `json:"roots"`
+	TemplateName string       `yaml:"template_name"`
+	Algorithm    string       `yaml:"algorithm"`
+	CreatedAt    time.Time    `yaml:"created_at"`
+	UpdatedAt    time.Time    `yaml:"updated_at"`
+	Roots        []MerkleNode `yaml:"roots"`
+}
+
+// ManifestPath returns the path for a template-specific manifest on a device
+// If templateName == ", fallbacks to the global ManifestPath
+func ManifestPath(deviceMount, templateName string) string {
+
+	base := filepath.Join(deviceMount, backdMetaDir, backdMetaDir)
+	if templateName == "" {
+		return filepath.Join(base, "manifest.yaml")
+	}
+
+	return filepath.Join(base, "templates", templateName+"-manifest.yaml")
+}
+
+func LoadManifest(deviceMount, templateName string) (Manifest, error) {
+
+	path := ManifestPath(deviceMount, templateName)
+
+	// Read the file
+	f, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return Manifest{}, fmt.Errorf("Manifest %s not found", templateName)
+		}
+		return Manifest{}, fmt.Errorf("Failed Reading %s", templateName)
+	}
+
+	// Unmarshall and send it back
+	var m Manifest
+
+	if err := yaml.Unmarshal(f, &m); err != nil {
+		return Manifest{}, fmt.Errorf("Failed Unmarshalling : %s : %v ", path, err)
+	}
+
+	// Success, return Manifest
+	return m, nil
+
 }

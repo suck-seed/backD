@@ -2,12 +2,13 @@ package template
 
 import (
 	"backD/internal/config"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"time"
+
+	"go.yaml.in/yaml/v3"
 )
 
 func Save(t BackupTemplate) error {
@@ -27,7 +28,8 @@ func Save(t BackupTemplate) error {
 		t.CreatedAt = time.Now()
 	}
 
-	data, err := json.MarshalIndent(t, "", " ")
+	// data, err := json.MarshalIndent(t, "", " ")
+	data, err := yaml.Marshal(t)
 	if err != nil {
 		return err
 	}
@@ -47,8 +49,8 @@ func Load(name string) (BackupTemplate, error) {
 	}
 
 	var t BackupTemplate
-	if err := json.Unmarshal(data, &t); err != nil {
-		return BackupTemplate{}, fmt.Errorf("Template %q is invalid JSON: %w", name, err)
+	if err := yaml.Unmarshal(data, &t); err != nil {
+		return BackupTemplate{}, fmt.Errorf("Template %q is invalid YAML: %w", name, err)
 	}
 
 	return t, nil
@@ -71,10 +73,10 @@ func List() (names []string, err error) {
 	// loop through the entries
 	for _, e := range entries {
 
-		// should be a file and must have suffix json
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
+		// should be a file and must have suffix yaml
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".yaml") {
 
-			n = append(n, strings.TrimSuffix(e.Name(), ".json"))
+			n = append(n, strings.TrimSuffix(e.Name(), ".yaml"))
 		}
 	}
 
