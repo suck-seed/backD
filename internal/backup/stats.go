@@ -88,13 +88,13 @@ func (s Stats) Elapsed() string {
 
 	switch {
 	case hour > 0:
-		return fmt.Sprint("%dh %dm %ds", hour, min, sec)
+		return fmt.Sprintf("%dh %dm %ds", hour, min, sec)
 
 	case min > 0:
-		return fmt.Sprint("%dm %ds", min, sec)
+		return fmt.Sprintf("%dm %ds", min, sec)
 
 	default:
-		return fmt.Sprint("%ds", sec)
+		return fmt.Sprintf("%ds", sec)
 
 	}
 

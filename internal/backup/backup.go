@@ -3,7 +3,6 @@ package backup
 import (
 	"fmt"
 	"os"
-	"time"
 )
 
 // ProcessMsg is sent on progress channel after every file decision
@@ -73,5 +72,5 @@ func run(opts Options, ch chan<- ProcessMsg) {
 	}
 
 	// Make a new stats with the starting time as now
-	stats := Stats{StartedAt: time.Now()}
+	// stats := Stats{StartedAt: time.Now()}
 }
