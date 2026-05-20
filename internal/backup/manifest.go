@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -69,3 +70,63 @@ func LoadManifest(deviceMount, templateName string) (Manifest, error) {
 	return m, nil
 
 }
+
+// SaveManifest serialises m and mount it automatically to the corrrect location
+// on the external device
+// Creates any missing directories
+func SaveManifest(deviceMount, templateName string, m Manifest) error {
+
+	path := ManifestPath(deviceMount, templateName)
+
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("create manifest directory: %w", err)
+	}
+
+	data, err := yaml.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("marshal manifest: %w", err)
+	}
+
+	// Write to a tmp file, then rename
+	// For atomicity and to prevent potential race condition
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return fmt.Errorf("write manifest tmp: %w", err)
+	}
+
+	// Rename
+	if err := os.Rename(tmp, path); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("rename manifest %s -> %s: %w", tmp, path, err)
+	}
+
+	return nil
+
+}
+
+func DeleteManifest(deviceMount, templateName string) error {
+	path := ManifestPath(deviceMount, templateName)
+	err := os.Remove(path)
+	if err != nil {
+		return fmt.Errorf("delete manifest path %s: %w", path, err)
+	}
+
+	return nil
+}
+
+func ManifestExists(deviceMount, templateName string) bool {
+
+	_, err := os.Lstat(ManifestPath(deviceMount, templateName))
+
+	return err == nil
+}
+
+// Sentinel errors for manifest operations.
+var (
+	// ErrManifestNotFound is returned by LoadManifest when no manifest exists
+	// this is normal on the first backup run.
+	ErrManifestNotFound = errors.New("manifest not found")
+
+	// ErrManifestCorrupted is returned when a manifest file cannot be decoded.
+	ErrManifestCorrupted = errors.New("manifest corrupted")
+)
