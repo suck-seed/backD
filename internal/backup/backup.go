@@ -104,9 +104,77 @@ func run(opts Options, ch chan<- ProgressMsg) {
 	if opts.Algorithm == AlgorithmMerkle {
 		merkleChanged = make(map[string]bool)
 
-		// for _, src := range opts.Sources {
+		for _, src := range opts.Sources {
+			tree, err := BuildTree(src)
+			if err != nil {
+				// If we cant build the tree
+				// Fall back to copying everything
+				allFiles, _ := listAllFiles(src)
+				for _, f := range allFiles {
 
-		// }
+					merkleChanged[f] = true
+				}
+				continue
+			}
+
+			currentRoots = append(currentRoots, tree)
+
+			// Find matching root in previous manifest.
+			prevRoot, found := findRootByPath(prevManifest.Roots, src)
+			if !found {
+				// Entire source is new — mark all its files.
+				for _, f := range collectFiles(tree) {
+					merkleChanged[f] = true
+				}
+				continue
+			}
+
+			// Only diff paths that actually changed.
+			for _, changed := range DiffTrees(tree, prevRoot) {
+				merkleChanged[changed] = true
+			}
+		}
+	}
+
+	// Main walk
+	for _, src := range opts.Sources {
+		walkSource(src, opts, merkleChanged, &stats, ch)
+	}
+
+	stats.FinishedAt = time.Now()
+
+	// Merkle Mode save updated manifest
+	if opts.Algorithm == AlgorithmMerkle && !opts.DryRun && stats.FailedFiles == 0 {
+
+		newManifest := Manifest{
+			TemplateName: opts.TemplateName,
+			Algorithm:    string(AlgorithmMerkle),
+			CreatedAt: func() time.Time {
+				if prevManifest.CreatedAt.IsZero() {
+					return stats.StartedAt
+				}
+				return prevManifest.CreatedAt
+			}(),
+			UpdatedAt: stats.FinishedAt,
+			Roots:     currentRoots,
+		}
+
+		// Save this manifest file
+		if err := SaveManifest(opts.DeviceMount, opts.TemplateName, newManifest); err != nil {
+
+			ch <- ProgressMsg{
+				Stats: stats,
+				Done:  true,
+				Err:   fmt.Errorf("backup completed but manifest could not be saved: %w", err),
+			}
+			return
+		}
+
+	}
+
+	ch <- ProgressMsg{
+		Stats: stats,
+		Done:  true,
 	}
 }
 
