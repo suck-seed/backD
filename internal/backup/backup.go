@@ -90,9 +90,197 @@ func run(opts Options, ch chan<- ProgressMsg) {
 		// Missing a manifest will -> copy everything and make a new manifest
 	}
 
-	// for _, iSrc := range opts.Sources {
+	for _, iSrc := range opts.Sources {
+		n, err := countFiles(iSrc)
+		if err != nil {
 
-	// }
+			// Source path missing, we'll record the failure during the walk
+			continue
+		}
+
+		stats.TotalFiles += n
+	}
+
+	if opts.Algorithm == AlgorithmMerkle {
+		merkleChanged = make(map[string]bool)
+
+		// for _, src := range opts.Sources {
+
+		// }
+	}
+}
+
+// walkSource processes one top-level source path (file or directory)
+func walkSource(src string, opts Options, merkleChanged map[string]bool, stats *Stats, ch chan<- ProgressMsg) {
+
+	srcInfo, err := os.Lstat(src)
+	if err != nil {
+		stats.FailedFiles++
+		sendProgress(ch, *stats)
+		return
+	}
+
+	if !srcInfo.IsDir() {
+		processFile(src, srcInfo, opts, merkleChanged, stats, ch)
+		return
+	}
+
+	_ = filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			stats.FailedFiles++
+			sendProgress(ch, *stats)
+			return nil // continue walking
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			stats.FailedFiles++
+			sendProgress(ch, *stats)
+			return nil
+		}
+		processFile(path, info, opts, merkleChanged, stats, ch)
+		return nil
+	})
+}
+
+// processFile applies the chosen algorithm to a single file and updates stats.
+func processFile(src string, srcInfo os.FileInfo, opts Options, merkleChanged map[string]bool, stats *Stats, ch chan<- ProgressMsg) {
+	stats.CurrentFile = src
+	dst := MirrorSrcToDst(src, opts.DeviceMount)
+
+	switch opts.Algorithm {
+	case AlgorithmMetadata:
+		processWithMetadata(src, dst, srcInfo, opts.DryRun, stats, ch)
+
+	case AlgorithmHash:
+		processWithHash(src, dst, opts.DryRun, stats, ch)
+
+	case AlgorithmMerkle:
+		// Merkle mode uses the pre-computed change set for the copy decision,
+		// but still delegates the actual copy to the metadata helper so that
+		// freshness within a changed subtree is still respected.
+		if merkleChanged[src] {
+			processWithMetadata(src, dst, srcInfo, opts.DryRun, stats, ch)
+		} else {
+			stats.SkippedFiles++
+			sendProgress(ch, *stats)
+		}
+
+	default:
+		// Unreachable after validation, but be safe.
+		processWithMetadata(src, dst, srcInfo, opts.DryRun, stats, ch)
+	}
+}
+
+// processWithMetadata applies the metadata comparison strategy.
+func processWithMetadata(src, dst string, srcInfo os.FileInfo, dryRum bool, stats *Stats, ch chan<- ProgressMsg) {
+	metaDecision := MetadataCheck(srcInfo, dst)
+
+	switch metaDecision {
+	case MetadataDecisionSkip:
+		stats.SkippedFiles++
+		sendProgress(ch, *stats)
+		return
+
+	case MetadataDecisionCopy, MetadataDecisionUpdate:
+
+		if dryRum {
+			if metaDecision == MetadataDecisionCopy {
+				stats.CopiedFiles++
+			} else {
+				stats.UpdatedFiles++
+			}
+
+			sendProgress(ch, *stats)
+			return
+		}
+
+		existed := metaDecision == MetadataDecisionUpdate
+		written, result, err := SafeCopy(src, dst, existed)
+		if err != nil {
+			stats.FailedFiles++
+			sendProgress(ch, *stats)
+			return
+		}
+
+		applyResult(result, written, stats)
+		sendProgress(ch, *stats)
+	}
+
+}
+
+// processWithHash applies the SHA-256 content comparision strategy
+func processWithHash(src, dst string, dryRun bool, stats *Stats, ch chan<- ProgressMsg) {
+
+	// Fetch hash decision
+	hashDecision, err := HashCheck(src, dst)
+
+	// Handle err and HashDecisionFailed
+	if err != nil || hashDecision == HashDecisionFailed {
+		stats.FailedFiles++
+		sendProgress(ch, *stats)
+		return
+	}
+
+	// Handle other 3 decision
+	switch hashDecision {
+
+	case HashDecisionSkip:
+		stats.SkippedFiles++
+		sendProgress(ch, *stats)
+
+	case HashDecisionCopy, HashDecisionUpdate:
+
+		if dryRun {
+			if hashDecision == HashDecisionCopy {
+				stats.CopiedFiles++
+			} else {
+				stats.UpdatedFiles++
+			}
+			sendProgress(ch, *stats)
+			return
+		}
+
+		existed := hashDecision == HashDecisionUpdate
+		written, result, copyErr := SafeCopy(src, dst, existed)
+		if copyErr != nil {
+			stats.FailedFiles++
+			sendProgress(ch, *stats)
+			return
+		}
+
+		applyResult(result, written, stats)
+		sendProgress(ch, *stats)
+
+	}
+
+}
+
+// applyResult updates stats from a SafeCopy result.
+func applyResult(r CopyResult, written int64, stats *Stats) {
+	switch r {
+	case CopyResultCopied:
+		stats.CopiedFiles++
+		stats.CopiedBytes += written
+	case CopyResultUpdated:
+		stats.UpdatedFiles++
+		stats.CopiedBytes += written
+	case CopyResultFailed:
+		stats.FailedFiles++
+	}
+}
+
+// sendProgress sends a copy of stats on the channel without blocking.
+func sendProgress(ch chan<- ProgressMsg, s Stats) {
+
+	select {
+	case ch <- ProgressMsg{Stats: s}:
+	default:
+		// Channel full — drop the intermediate update. The TUI will catch up
+		// on the next message. The final Done message is always sent.
+	}
 }
 
 // countFiles returns the number of regular files reachable from path.
