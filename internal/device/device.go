@@ -3,6 +3,7 @@ package device
 import (
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ExternalDevice represents a mounted external storage device.
@@ -33,7 +34,7 @@ func Detect() ([]*ExternalDevice, error) {
 	// Searchable file paths in linux
 	searchPath := []string{
 		"/mnt",
-		filepath.Join("run/media", username),
+		filepath.Join("/run/media", username),
 		filepath.Join("/media", username),
 	}
 
@@ -80,7 +81,7 @@ func Detect() ([]*ExternalDevice, error) {
 			}
 
 			devices = append(devices, &ExternalDevice{
-				Name:           e.Name(),
+				Name:           formatName(e.Name()),
 				MountPath:      mount,
 				FileSystem:     fsType,
 				TotalSpace:     total,
@@ -92,5 +93,13 @@ func Detect() ([]*ExternalDevice, error) {
 
 	}
 
-	return []*ExternalDevice{}, nil
+	return devices, nil
+}
+
+// formatName turns a mount label into a human-readable name.
+func formatName(label string) string {
+	// Replace underscores and dashes with spaces, title-case
+	name := strings.ReplaceAll(label, "_", " ")
+	name = strings.ReplaceAll(name, "-", " ")
+	return name
 }
